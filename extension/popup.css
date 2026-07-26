@@ -615,3 +615,50 @@ input[type="number"]:focus {
   font-size: 0.78rem;
   white-space: nowrap;
 }
+
+/* Freighter update banner (#046 / GrantFox OSS) */
+.freighter-banner {
+  background: linear-gradient(
+    135deg,
+    rgba(245, 158, 11, 0.15),
+    rgba(217, 119, 6, 0.08)
+  );
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: #fde68a;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.freighter-banner .banner-content strong {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: #fcd34d;
+}
+
+.freighter-banner .banner-content p {
+  margin: 0 0 8px 0;
+  color: #fde68a;
+}
+
+.freighter-banner .banner-cta {
+  display: inline-block;
+  background: rgba(245, 158, 11, 0.25);
+  color: #fcd34d;
+  text-decoration: none;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  transition: background 0.15s ease;
+}
+
+.freighter-banner .banner-cta:hover {
+  background: rgba(245, 158, 11, 0.4);
+  color: #fff;
+}
+

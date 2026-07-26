@@ -2,6 +2,13 @@
 
 ### Bug Fixes
 
+* **extension:** add graceful Freighter API version-incompatibility error handling (closes #046)
+  - New `extension/src/freighter-compat.ts` module probes `window.freighter` for required methods (`getPublicKey`, `signTransaction`, `isConnected`, `disconnect`) and a minimum version (2.0.0) and surfaces an actionable "Please update Freighter" message with a link to `https://www.freighter.app/`
+  - Typed `FreighterOutdatedError` / `FreighterNotInstalledError` with a `FreighterApiInfo` payload so callers can render context-aware upgrade prompts
+  - Safe `callFreighter()` wrapper re-throws runtime `TypeError: ... is not a function` as a typed compatibility error
+  - `popup.ts` `connectWallet` and `settings.ts` wallet helpers use the compat module; an amber `#freighter-update-banner` is shown inline above the existing UI
+  - Content-script bridge in `content-script-logic.ts` uses a per-call `requestId` nonce (`crypto.randomUUID()` echoed via `postMessage`) to defend against malicious pages spoofing Freighter responses
+  - `extension/src/__tests__/freighter-compat.test.ts` covers parseSemver, compareSemver, version-vs-min, missing methods, runtime TypeError, error formatting, and the assert guard
 * **backend:** surface geocoding failures as project creation warnings (closes #519)
 
 ### Documentation

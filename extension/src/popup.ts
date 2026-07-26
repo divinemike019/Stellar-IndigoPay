@@ -6,6 +6,13 @@ import {
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
 import { loadSettings, type ExtensionSettings } from './settings';
+import {
+  detectFreighterApi,
+  callFreighter,
+  formatFreighterError,
+  FreighterNotInstalledError,
+  FreighterOutdatedError,
+} from './freighter-compat';
 
 // Module-level vars
 let API_BASE = 'https://api.stellar-indigopay.app';
@@ -44,13 +51,31 @@ async function updateDonationBadge(totalXLM: number) {
 }
 
 async function signWithFreighter(xdr: string): Promise<string> {
-  const freighter = (window as any).freighter;
-  if (!freighter) throw new Error('Freighter extension not found');
-
-  const signedXdr: string = await freighter.signTransaction(xdr, {
+  // callFreighter() does a fresh compatibility probe and throws a typed
+  // FreighterOutdatedError if the API is too old to support signTransaction.
+  // The popup's catch (in connectWallet / donate submit handlers) converts
+  // this into a user-facing upgrade prompt via formatFreighterError().
+  return callFreighter<string>('signTransaction', undefined, xdr, {
     networkPassphrase: NETWORK_PASSPHRASE,
   });
-  return signedXdr;
+}
+
+/**
+ * Render a Freighter compatibility issue directly into the popup UI.
+ * Used when the wallet UI fails to even reach the connect button.
+ */
+function showFreighterUpgradeBanner(message: string, upgradeUrl: string): void {
+  const banner = document.getElementById('freighter-update-banner');
+  if (!banner) return;
+  banner.innerHTML = `
+    <div class="banner-content">
+      <strong>⚠️ Freighter update required</strong>
+      <p>${escapeHtml(message)}</p>
+      <a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noopener noreferrer"
+         class="banner-cta">Update Freighter →</a>
+    </div>
+  `;
+  banner.classList.remove('hidden');
 }
 
 async function submitTransaction(signedXdr: string): Promise<string> {
@@ -346,14 +371,29 @@ async function fetchProfile(publicKey: string): Promise<any> {
 let currentPublicKey: string | null = null;
 
 async function connectWallet() {
-  try {
-    const freighter = (window as any).freighter;
-    if (!freighter) {
-      alert('Please install the Freighter wallet extension.');
+  // Pre-flight compatibility check: surface a clear UI banner if Freighter
+  // is missing or outdated BEFORE any error dialog appears. This converts a
+  // "TypeError: freighter.getPublicKey is not a function" into an actionable
+  // upgrade prompt (#046 / GrantFox OSS).
+  const compat = detectFreighterApi();
+  if (!compat.isCompatible) {
+    showFreighterUpgradeBanner(
+      compat.issue ?? 'Freighter wallet is not compatible with this extension.',
+      compat.upgradeUrl,
+    );
+    if (!compat.installed) {
+      // Legacy behavior — keep the alert for the "not installed" case so
+      // first-time users still see the install prompt they expect.
+      alert(compat.issue ?? 'Please install the Freighter wallet extension.');
       return;
     }
+    return;
+  }
 
-    const publicKey = await freighter.getPublicKey();
+  try {
+    // callFreighter() re-verifies compatibility on each call and converts
+    // missing-method errors into typed FreighterOutdatedError.
+    const publicKey = await callFreighter<string>('getPublicKey');
     currentPublicKey = publicKey;
 
     // UI Updates
@@ -379,7 +419,16 @@ async function connectWallet() {
 
   } catch (err: any) {
     console.error('Wallet connect error:', err);
-    alert('Failed to connect wallet: ' + (err.message || 'Unknown error'));
+    // Format-friendly upgrade messages for both FreighterOutdatedError and
+    // FreighterNotInstalledError, preserving the original message for any
+    // other runtime error (user rejection, network, etc.).
+    if (err instanceof FreighterOutdatedError || err instanceof FreighterNotInstalledError) {
+      const formatted = formatFreighterError(err);
+      showFreighterUpgradeBanner(formatted.message, formatted.upgradeUrl);
+      alert(formatted.message);
+      return;
+    }
+    alert('Failed to connect wallet: ' + (err?.message || 'Unknown error'));
   }
 }
 
