@@ -4,6 +4,13 @@ export interface ExtensionSettings {
   defaultDonationAmount: string;
 }
 
+import {
+  detectFreighterApi,
+  FreighterNotInstalledError,
+  FreighterOutdatedError,
+  formatFreighterError,
+} from "./freighter-compat";
+
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   backendUrl: "https://api.stellar-indigopay.app",
   network: "testnet",
@@ -37,34 +44,120 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
+/**
+ * Show a Freighter compatibility upgrade prompt in the settings UI.
+ * ↪ #046 / GrantFox OSS — converts cryptic "is not a function" errors
+ *   into actionable upgrade instructions.
+ */
+function showWalletUpdateBanner(message: string, upgradeUrl: string): void {
+  const banner = document.getElementById("wallet-update-banner");
+  if (!banner) return;
+  banner.innerHTML = `
+    <div class="banner-content">
+      <strong>⚠️ Freighter update required</strong>
+      <p>${escapeHtml(message)}</p>
+      <a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noopener noreferrer"
+         class="banner-cta">Update Freighter →</a>
+    </div>
+  `;
+  banner.classList.remove("hidden");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+/**
+ * Get the connected wallet public key. Returns null if Freighter is not
+ * installed, is too old to expose getPublicKey, or the user has not yet
+ * authorized the extension.
+ *
+ * Pre-flight compatibility check via detectFreighterApi() avoids surfacing
+ * a "TypeError: freighter.getPublicKey is not a function" — instead we
+ * render an upgrade prompt (#046).
+ */
 async function getWalletPublicKey(): Promise<string | null> {
-  const freighter = (window as any).freighter;
-  if (!freighter || typeof freighter.getPublicKey !== "function") return null;
+  const compat = detectFreighterApi();
+  if (!compat.isCompatible || !compat.installed) {
+    if (!compat.isCompatible && compat.isOutdated && compat.issue) {
+      showWalletUpdateBanner(compat.issue, compat.upgradeUrl);
+    }
+    return null;
+  }
   try {
-    return (await freighter.getPublicKey()) as string;
-  } catch {
+    const fn = (window as any).freighter.getPublicKey;
+    if (typeof fn !== "function") return null;
+    return (await fn.call((window as any).freighter)) as string;
+  } catch (err) {
+    if (
+      err instanceof FreighterOutdatedError ||
+      err instanceof FreighterNotInstalledError
+    ) {
+      const f = formatFreighterError(err);
+      showWalletUpdateBanner(f.message, f.upgradeUrl);
+    }
     return null;
   }
 }
 
+/**
+ * Check whether Freighter currently has this extension authorized.
+ *
+ * Surfaces an upgrade prompt if Freighter is installed but isConnected()
+ * is missing from the API surface — this is the symptom of an outdated
+ * Freighter that no longer exposes the legacy connection check.
+ */
 async function isFreighterConnected(): Promise<boolean> {
-  const freighter = (window as any).freighter;
-  if (!freighter || typeof freighter.isConnected !== "function") return false;
+  const compat = detectFreighterApi();
+  if (!compat.isCompatible || !compat.installed) {
+    if (!compat.isCompatible && compat.isOutdated && compat.issue) {
+      showWalletUpdateBanner(compat.issue, compat.upgradeUrl);
+    }
+    return false;
+  }
   try {
-    const result = await freighter.isConnected();
+    const fn = (window as any).freighter.isConnected;
+    if (typeof fn !== "function") return false;
+    const result = await fn.call((window as any).freighter);
     return result === true || result?.isConnected === true;
-  } catch {
+  } catch (err) {
+    if (
+      err instanceof FreighterOutdatedError ||
+      err instanceof FreighterNotInstalledError
+    ) {
+      const f = formatFreighterError(err);
+      showWalletUpdateBanner(f.message, f.upgradeUrl);
+    }
     return false;
   }
 }
 
 async function freighterDisconnect(): Promise<void> {
+  const compat = detectFreighterApi();
+  if (!compat.isCompatible || !compat.installed) {
+    if (!compat.isCompatible && compat.isOutdated && compat.issue) {
+      showWalletUpdateBanner(compat.issue, compat.upgradeUrl);
+    }
+    return;
+  }
   const freighter = (window as any).freighter;
   if (freighter && typeof freighter.disconnect === "function") {
     try {
       await freighter.disconnect();
-    } catch {
-      // Silently ignore
+    } catch (err) {
+      if (
+        err instanceof FreighterOutdatedError ||
+        err instanceof FreighterNotInstalledError
+      ) {
+        const f = formatFreighterError(err);
+        showWalletUpdateBanner(f.message, f.upgradeUrl);
+      }
+      // Silently ignore other errors
     }
   }
 }

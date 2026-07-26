@@ -9,6 +9,14 @@
  */
 
 import { mountDonateOverlay, type ProjectInfo } from "./inject/donate-overlay";
+import {
+  detectFreighterApi,
+  formatFreighterError,
+  FreighterNotInstalledError,
+  FreighterOutdatedError,
+  REQUIRED_METHODS as REQUIRED_METHODS_FROM_COMPAT,
+  type FreighterMethodName,
+} from "./freighter-compat";
 
 // ── constants ────────────────────────────────────────────────────────
 
@@ -316,28 +324,67 @@ export async function handleDonateSubmit(
 
 /**
  * Connect to Freighter wallet via the injected bridge script.
+ *
+ * The bridge runs in the PAGE world (not isolated) because that's the only
+ * context where `window.freighter` is visible. It performs a method
+ * existence check before calling getPublicKey and posts a typed
+ * FREIGHTER_OUTDATED / FREIGHTER_MISSING / FREIGHTER_CONNECTED message back.
+ * ↪ #046 / GrantFox OSS — surface actionable upgrade prompts when the
+ *   Freighter API shape doesn't match what this extension needs.
+ *
+ * SECURITY: We use a short-lived random nonce (`requestId`) to prevent
+ * arbitrary pages from spoofing Freighter responses. The nonce is generated
+ * in the content script, written to the bridge <script> as a data-attribute,
+ * and echoed back in the postMessage payload. The handler rejects any
+ * message whose requestId doesn't match the active one.
  */
 export async function connectFreighter(): Promise<string> {
   return new Promise((resolve, reject) => {
+    const requestId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     const script = document.createElement("script");
+    // The bridge reads its requestId from its own data-request-id attribute.
+    script.setAttribute("data-request-id", requestId);
     script.textContent = `
       (async function() {
+        var requestId = (document.currentScript && document.currentScript.getAttribute('data-request-id')) || '';
         try {
-          const freighter = window.freighter;
-          if (!freighter || typeof freighter.getPublicKey !== 'function') {
-            throw new Error('Freighter not available');
+          var freighter = window.freighter;
+          if (!freighter || typeof freighter !== 'object') {
+            window.postMessage({
+              source: 'indigopay-extension',
+              type: 'FREIGHTER_MISSING',
+              requestId: requestId,
+              message: 'Freighter extension not detected. Please install Freighter to continue.'
+            }, '*');
+            return;
           }
-          const publicKey = await freighter.getPublicKey();
+          if (typeof freighter.getPublicKey !== 'function') {
+            window.postMessage({
+              source: 'indigopay-extension',
+              type: 'FREIGHTER_OUTDATED',
+              requestId: requestId,
+              missing: ['getPublicKey'],
+              message: 'Your Freighter wallet is outdated and is missing the following API method: getPublicKey. Please update Freighter to the latest version.'
+            }, '*');
+            return;
+          }
+          var publicKey = await freighter.getPublicKey();
           window.postMessage({
             source: 'indigopay-extension',
             type: 'FREIGHTER_CONNECTED',
+            requestId: requestId,
             publicKey: publicKey
           }, '*');
         } catch (err) {
           window.postMessage({
             source: 'indigopay-extension',
             type: 'FREIGHTER_ERROR',
-            error: err.message || 'Failed to connect'
+            requestId: requestId,
+            message: (err && err.message) || 'Failed to connect'
           }, '*');
         }
       })();
@@ -347,12 +394,65 @@ export async function connectFreighter(): Promise<string> {
 
     const handler = (event: MessageEvent) => {
       if (event.data?.source !== "indigopay-extension") return;
+      // Reject messages without a matching requestId — defends against
+      // malicious pages spoofing Freighter responses (#046 hardening).
+      if (event.data?.requestId !== requestId) return;
       if (event.data.type === "FREIGHTER_CONNECTED") {
         window.removeEventListener("message", handler);
         resolve(event.data.publicKey);
+      } else if (event.data.type === "FREIGHTER_MISSING") {
+        window.removeEventListener("message", handler);
+        // IMPORTANT: don't re-probe via detectFreighterApi() here — the
+        // content script runs in an isolated world and can't see
+        // window.freighter in the page world. Synthesize the info from the
+        // bridge's own report instead so the error message matches the
+        // real diagnosis (not a misleading "not installed").
+        const info: import("./freighter-compat").FreighterApiInfo = {
+          installed: false,
+          version: null,
+          versionString: null,
+          availableMethods: [],
+          missingMethods: [...REQUIRED_METHODS_FROM_COMPAT],
+          isCompatible: false,
+          isOutdated: false,
+          issue:
+            event.data.message ??
+            "Freighter extension not detected. Please install Freighter to continue.",
+          upgradeUrl: "https://www.freighter.app/",
+        };
+        reject(new FreighterNotInstalledError(info));
+      } else if (event.data.type === "FREIGHTER_OUTDATED") {
+        window.removeEventListener("message", handler);
+        // Only keep names that match the known set; the bridge could in theory
+        // post arbitrary strings, and we don't want to widen the typed enum.
+        const missing: FreighterMethodName[] = Array.isArray(event.data.missing)
+          ? (event.data.missing.filter(
+              (m: any): m is FreighterMethodName =>
+                typeof m === "string" &&
+                (REQUIRED_METHODS_FROM_COMPAT as readonly string[]).includes(m),
+            ) as FreighterMethodName[])
+          : [];
+        const info: import("./freighter-compat").FreighterApiInfo = {
+          installed: true,
+          version: null,
+          versionString: null,
+          availableMethods: REQUIRED_METHODS_FROM_COMPAT.filter(
+            (m) => !missing.includes(m),
+          ),
+          missingMethods: missing.length > 0
+            ? missing
+            : [...REQUIRED_METHODS_FROM_COMPAT],
+          isCompatible: false,
+          isOutdated: true,
+          issue:
+            event.data.message ??
+            "Your Freighter wallet is outdated. Please update Freighter to the latest version.",
+          upgradeUrl: "https://www.freighter.app/",
+        };
+        reject(new FreighterOutdatedError(info));
       } else if (event.data.type === "FREIGHTER_ERROR") {
         window.removeEventListener("message", handler);
-        reject(new Error(event.data.error));
+        reject(new Error(event.data.message));
       }
     };
     window.addEventListener("message", handler);
@@ -362,6 +462,56 @@ export async function connectFreighter(): Promise<string> {
       reject(new Error("Freighter connection timed out"));
     }, 10000);
   });
+}
+
+/**
+ * Convenience helper: classify an exception thrown by `connectFreighter`
+ * and surface an upgrade prompt into the named overlay element, if any.
+ * Returns a friendly message that can also be shown via alert()/UI.
+ */
+export function formatFreighterBridgeError(
+  err: unknown,
+  overlayEl?: HTMLElement | null,
+): string {
+  const formatted = formatFreighterError(err);
+  if (!overlayEl) return formatted.message;
+  // For the inline overlay, also show a banner above the existing body.
+  // We avoid overwriting existing UI; if a banner is already there, leave it.
+  let banner = overlayEl.querySelector<HTMLElement>(".igp-freighter-update-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.className = "igp-freighter-update-banner";
+    banner.style.cssText = `
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1));
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      color: #92400e;
+      font-size: 13px;
+      line-height: 1.4;
+    `;
+    const body = overlayEl.querySelector<HTMLElement>(".igp-body");
+    if (body) body.prepend(banner);
+  }
+  banner.innerHTML = `
+    <strong>⚠️ ${formatted.isOutdated ? "Update" : "Install"} Freighter</strong>
+    <p style="margin: 4px 0 8px 0;">${escapeHtmlBridge(formatted.message)}</p>
+    <a href="${escapeHtmlBridge(formatted.upgradeUrl)}" target="_blank" rel="noopener noreferrer"
+       style="color:#92400e;font-weight:600;text-decoration:underline;">
+       ${formatted.isOutdated ? "Update Freighter →" : "Install Freighter →"}
+    </a>
+  `;
+  return formatted.message;
+}
+
+function escapeHtmlBridge(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 // ── full page scan ───────────────────────────────────────────────────
@@ -535,7 +685,20 @@ export function wireBodyEvents(
         }
         updateSubmitBtn(amountInput, submitBtn, pk);
       } catch (err: any) {
-        if (statusEl) {
+        // Friendly upgrade prompt if Freighter is outdated/missing (#046).
+        // Otherwise show the original error as a status line.
+        if (
+          err instanceof FreighterOutdatedError ||
+          err instanceof FreighterNotInstalledError
+        ) {
+          formatFreighterBridgeError(err, overlayEl);
+          if (statusEl) {
+            statusEl.textContent = err instanceof FreighterOutdatedError
+              ? "Your Freighter wallet is outdated. Please update Freighter to continue."
+              : "Freighter wallet not detected. Please install it to continue.";
+            statusEl.className = "igp-donate-status igp-status-error";
+          }
+        } else if (statusEl) {
           statusEl.textContent = `Failed to connect: ${err.message || "Unknown error"}`;
           statusEl.className = "igp-donate-status igp-status-error";
         }
