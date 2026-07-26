@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Features
+
+* **mobile:** add biometric authentication fallback for devices without biometric sensors (closes #547)
+  - `useBiometricAuth` now calls `LocalAuthentication.authenticateAsync({ disableDeviceFallback: false })` so the OS can drop into the device passcode/PIN prompt when no biometric sensor is present (issue #047)
+  - New `biometricsUnavailable` flag exposed on the hook and on `confirmDonation` result for the four documented unavailability error codes (`authentication_unavailable`, `invalid_authentication_type`, `no_enrolled_credentials`, `passcode_not_set`) so callers can show a graceful "device authentication unavailable" message
+  - Standalone `authenticate(reason)` helper updated to use the same passcode fallback path; existing `secureStore` and `AuthProvider.unlock` consumers continue to fail closed when no auth method is available
+
 ### Bug Fixes
 
 * **backend:** surface geocoding failures as project creation warnings (closes #519)
