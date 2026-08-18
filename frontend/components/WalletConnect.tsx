@@ -6,12 +6,13 @@ import { useState } from "react";
 import { connectWallet, isFreighterInstalled } from "@/lib/wallet";
 import { trackEvent } from "@/lib/analytics";
 import { useI18n } from "@/lib/i18n";
+import { ComponentErrorBoundary } from "@/lib/ErrorBoundary";
 
 interface WalletConnectProps {
   onConnect: (pk: string) => void;
 }
 
-export default function WalletConnect({ onConnect }: WalletConnectProps) {
+function WalletConnectInner({ onConnect }: WalletConnectProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { t } = useI18n();
@@ -92,6 +93,14 @@ export default function WalletConnect({ onConnect }: WalletConnectProps) {
         </a>
       </p>
     </div>
+  );
+}
+
+export default function WalletConnect({ onConnect }: WalletConnectProps) {
+  return (
+    <ComponentErrorBoundary label="Wallet">
+      <WalletConnectInner onConnect={onConnect} />
+    </ComponentErrorBoundary>
   );
 }
 

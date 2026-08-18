@@ -7,6 +7,7 @@
  */
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import type { ClimateProject } from "@/utils/types";
+import { ComponentErrorBoundary } from "@/lib/ErrorBoundary";
 
 /**
  * A single donation event with enough info to place a marker on the map.
@@ -116,7 +117,7 @@ function projectCoords(project: ClimateProject): { cx: number; cy: number } {
   return REGION_COORDS.default;
 }
 
-export default function WorldMap({
+function WorldMapInner({
   projects,
   donations = [],
   projectCoordinates,
@@ -490,6 +491,14 @@ export default function WorldMap({
         }
       `}</style>
     </div>
+  );
+}
+
+export default function WorldMap(props: WorldMapProps) {
+  return (
+    <ComponentErrorBoundary label="World Map">
+      <WorldMapInner {...props} />
+    </ComponentErrorBoundary>
   );
 }
 
