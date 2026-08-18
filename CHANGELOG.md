@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Features
+
+* **frontend:** wrap interactive components in error boundaries to prevent cascade failures (closes #534)
+  - Add `ComponentErrorBoundary` class to `frontend/lib/ErrorBoundary.tsx` — a lightweight variant that renders an inline fallback ("This component could not be loaded") without a full-page retry UI
+  - Wrap `DonationQRCode`, `WalletConnect`, `WalletAddressQRCode`, and `WorldMap` internally so callers require no changes
+  - Unit tests: 6 new cases in `lib/__tests__/ErrorBoundary.test.tsx` covering `ComponentErrorBoundary` render, label, isolation, and fallback shape; 4 component-level isolation tests in `components/__tests__/ComponentErrorBoundary.isolation.test.tsx`
+
 ### Bug Fixes
 
 * **backend:** surface geocoding failures as project creation warnings (closes #519)

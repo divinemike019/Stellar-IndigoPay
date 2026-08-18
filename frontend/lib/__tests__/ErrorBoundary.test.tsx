@@ -14,7 +14,7 @@
  */
 import React, { type ReactNode } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { ErrorBoundary } from "@/lib/ErrorBoundary";
+import { ErrorBoundary, ComponentErrorBoundary } from "@/lib/ErrorBoundary";
 
 function Bomb({ shouldThrow }: { shouldThrow: boolean }) {
   if (shouldThrow) {
@@ -186,6 +186,96 @@ describe("ErrorBoundary", () => {
     fireEvent.click(screen.getByTestId("go-b"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByTestId("ok")).toBeInTheDocument();
+    consoleErrorSpy.mockRestore();
+  });
+});
+
+// ─── ComponentErrorBoundary ───────────────────────────────────────────────────
+
+describe("ComponentErrorBoundary", () => {
+  it("renders children normally when no error is thrown", () => {
+    render(
+      <ComponentErrorBoundary>
+        <div data-testid="child">hello</div>
+      </ComponentErrorBoundary>,
+    );
+    expect(screen.getByTestId("child")).toBeInTheDocument();
+    expect(screen.queryByTestId("component-error-boundary-fallback")).not.toBeInTheDocument();
+  });
+
+  it("renders the inline fallback when a child throws", () => {
+    const consoleErrorSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    render(
+      <ComponentErrorBoundary>
+        <Bomb shouldThrow={true} />
+      </ComponentErrorBoundary>,
+    );
+    const fallback = screen.getByTestId("component-error-boundary-fallback");
+    expect(fallback).toBeInTheDocument();
+    expect(fallback).toHaveAttribute("role", "alert");
+    expect(fallback.textContent).toMatch(/could not be loaded/i);
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("includes the label in the fallback message when provided", () => {
+    const consoleErrorSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    render(
+      <ComponentErrorBoundary label="Wallet">
+        <Bomb shouldThrow={true} />
+      </ComponentErrorBoundary>,
+    );
+    expect(screen.getByTestId("component-error-boundary-fallback").textContent).toMatch(
+      /wallet could not be loaded/i,
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("uses generic message when no label is supplied", () => {
+    const consoleErrorSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    render(
+      <ComponentErrorBoundary>
+        <Bomb shouldThrow={true} />
+      </ComponentErrorBoundary>,
+    );
+    expect(screen.getByTestId("component-error-boundary-fallback").textContent).toMatch(
+      /this component could not be loaded/i,
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("does NOT render a full-page retry button (stays lightweight)", () => {
+    const consoleErrorSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    render(
+      <ComponentErrorBoundary>
+        <Bomb shouldThrow={true} />
+      </ComponentErrorBoundary>,
+    );
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("isolates the error: a sibling outside the boundary still renders", () => {
+    const consoleErrorSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    render(
+      <div>
+        <ComponentErrorBoundary label="Broken">
+          <Bomb shouldThrow={true} />
+        </ComponentErrorBoundary>
+        <div data-testid="sibling">I am unaffected</div>
+      </div>,
+    );
+    expect(screen.getByTestId("sibling")).toBeInTheDocument();
+    expect(screen.getByTestId("component-error-boundary-fallback")).toBeInTheDocument();
     consoleErrorSpy.mockRestore();
   });
 });

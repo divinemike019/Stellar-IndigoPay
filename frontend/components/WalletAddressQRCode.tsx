@@ -14,6 +14,7 @@
  */
 import React, { useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
+import { ComponentErrorBoundary } from "@/lib/ErrorBoundary";
 
 interface WalletAddressQRCodeProps {
   /** Stellar public key of the project's receiving wallet */
@@ -43,7 +44,7 @@ function buildSep0007Uri(walletAddress: string, projectName: string): string {
   return `web+stellar:pay?${params.toString()}`;
 }
 
-const WalletAddressQRCode: React.FC<WalletAddressQRCodeProps> = ({
+const WalletAddressQRCodeInner: React.FC<WalletAddressQRCodeProps> = ({
   walletAddress,
   projectName,
   size = 160,
@@ -99,6 +100,12 @@ const WalletAddressQRCode: React.FC<WalletAddressQRCodeProps> = ({
     </div>
   );
 };
+
+const WalletAddressQRCode: React.FC<WalletAddressQRCodeProps> = (props) => (
+  <ComponentErrorBoundary label="QR Code">
+    <WalletAddressQRCodeInner {...props} />
+  </ComponentErrorBoundary>
+);
 
 export default WalletAddressQRCode;
 export { buildSep0007Uri };

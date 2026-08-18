@@ -131,6 +131,71 @@ export class ErrorBoundary extends Component<
 
 export default ErrorBoundary;
 
+// ─── ComponentErrorBoundary ───────────────────────────────────────────────────
+
+/**
+ * Lightweight error boundary for individual interactive widgets.
+ *
+ * Designed to isolate a single component so that a render failure in one
+ * widget (e.g. WalletConnect, DonationQRCode) does NOT propagate up to the
+ * page-level ErrorBoundary and take down the whole page.
+ *
+ * Shows a compact inline fallback card instead of the full-page error UI.
+ * Does not expose stack traces, retry buttons, or onError hooks — those are
+ * the responsibility of the top-level ErrorBoundary.
+ *
+ * Usage:
+ *   <ComponentErrorBoundary label="Wallet">
+ *     <WalletConnect ... />
+ *   </ComponentErrorBoundary>
+ */
+export interface ComponentErrorBoundaryProps {
+  children: ReactNode;
+  /** Display name shown in the fallback (e.g. "Wallet", "QR Code"). */
+  label?: string;
+}
+
+interface ComponentErrorBoundaryState {
+  hasError: boolean;
+}
+
+export class ComponentErrorBoundary extends Component<
+  ComponentErrorBoundaryProps,
+  ComponentErrorBoundaryState
+> {
+  state: ComponentErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): ComponentErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    // Best-effort Sentry capture — mirrors the top-level boundary but never
+    // throws so the fallback always renders.
+    captureError(error, info);
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+
+    return (
+      <div
+        role="alert"
+        aria-live="polite"
+        data-testid="component-error-boundary-fallback"
+        className="flex items-center justify-center rounded-xl border border-[rgba(244,63,94,0.15)] bg-[rgba(244,63,94,0.05)] px-4 py-3 text-sm text-[#E11D48] dark:text-[#FB7185]"
+      >
+        <span aria-hidden="true" className="mr-2 text-base">
+          ⚠️
+        </span>
+        {this.props.label
+          ? `${this.props.label} could not be loaded.`
+          : "This component could not be loaded."}
+      </div>
+    );
+  }
+}
+
 /**
  * Best-effort Sentry integration. Lazy plus try/caught so the boundary
  * keeps working in unit tests where `@sentry/nextjs` isn't loaded.

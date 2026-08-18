@@ -1,5 +1,6 @@
 import React, { useRef, useCallback } from "react";
 import { QRCodeCanvas } from "qrcode.react";
+import { ComponentErrorBoundary } from "@/lib/ErrorBoundary";
 
 interface DonationQRCodeProps {
   stellarUri: string;
@@ -50,26 +51,28 @@ const DonationQRCode = React.forwardRef<
   }, []);
 
   return (
-    <div
-      ref={onCanvasRef}
-      className="donation-qr-wrapper"
-      style={{ display: "inline-block" }}
-      aria-label={`QR code to donate to ${projectName}`}
-    >
-      <QRCodeCanvas
-        value={stellarUri}
-        size={size}
-        level="H" // High error correction – scannable even if partially obscured when printed
-        includeMargin={true}
-        imageSettings={{
-          src: "/logo-mark.png", // small centre logo; harmless 404 if absent
-          height: Math.round(size * 0.18),
-          width: Math.round(size * 0.18),
-          excavate: true,
-        }}
-        style={{ display: "block" }}
-      />
-    </div>
+    <ComponentErrorBoundary label="Donation QR Code">
+      <div
+        ref={onCanvasRef}
+        className="donation-qr-wrapper"
+        style={{ display: "inline-block" }}
+        aria-label={`QR code to donate to ${projectName}`}
+      >
+        <QRCodeCanvas
+          value={stellarUri}
+          size={size}
+          level="H" // High error correction – scannable even if partially obscured when printed
+          includeMargin={true}
+          imageSettings={{
+            src: "/logo-mark.png", // small centre logo; harmless 404 if absent
+            height: Math.round(size * 0.18),
+            width: Math.round(size * 0.18),
+            excavate: true,
+          }}
+          style={{ display: "block" }}
+        />
+      </div>
+    </ComponentErrorBoundary>
   );
 });
 
